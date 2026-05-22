@@ -111,9 +111,10 @@
 | 状態名 | この状態のとき、何をしているか | LEDやブザーなど出力の様子 |
 |:--|:--|:--|
 | 初期化 | LCD、超音波センサー、パッシブブザーの準備を行う | LCDに[Back Sonar][Ready]を表示する |
-|  |  |  |
-|  |  |  |
-|  |  |  |
+| 距離測定中 | 障害物までの距離を測定する | ブザーは鳴らさない |
+| 安全状態 | 距離が50cm以上か判定する | 距離を表示し、ブザーは鳴らさない |
+| 注意状態 | 距離が20cm以上50cm以下か判定する | 距離を表示し、ブザーをゆっくり鳴らす |
+| 危険状態 | 距離が20cm以下か判定する | 距離を表示し、ブザーを短い間隔で鳴らす |
 
 > [!TIP]
 > すべての状態から「抜け出せるルート」があるか確認してください。
@@ -130,17 +131,19 @@
 
 | 情報の名前 | 何を表すか | 型（イメージ） | バイト数 | 初期値 | 備考 |
 |:--|:--|:--|:--|:--|:--|
-| （例）currentState | 現在の状態（0:待機 1:動作 2:完了） | int | 2B | 0 | |
-| （例）sensorValue | センサーの計測値（cm） | int | 2B | 0 | 100msごとに更新 |
-| （例）lastMillis | millis()用タイマー | unsigned long | 4B | 0 | |
-| （例）buttonFlag | チャタリング後のボタン状態 | bool | 1B | false | |
-|  |  |  |  |  |  |
-|  |  |  |  |  |  |
+| trigPin | 超音波センサーのTrigピン | const int | 2B | 5 | Arduino D5を使用 |
+| echoPin | 超音波センサーのEchoピン | const int | 2B | 6 | Arduino D6を使用 |
+| buzzerPin | パッシブブザーの制御ピン | const int | 2B | 3 | Arduino D3を使用 |
+| duration | Echo信号の長さ | long | 4B | 0 | pulseInで取得する |
+| distanceCm | 障害物までの距離 | float | 4B | 0 | cm単位で扱う |
+| currentState | 現在の状態 | int | 2B | 0 | 0:Safe,1:Caution,2:Danger,3:Error |
+| cautionDistance | 注意と判断する距離 | const int | 2B | 50 | 50cm以下でCaution |
+| dangerDistance | 危険と判断する距離 | const int | 2B | 20 | 20cm以下でDanger |
 
 > [!CAUTION]
 > **SRAM使用量チェック（Arduino UNO R3 の上限は 2048B）**
 >
-> グローバル変数の合計: ＿＿＿ B
+> グローバル変数の合計:　20  B
 >
 > | 合計バイト数 | 判定 |
 > |:--|:--|
@@ -161,16 +164,14 @@
 
 | 機能ID | 機能名 | 関数名 | 担う「1つの仕事」 | 主な引数 | 戻り値 | 呼び出す場所 |
 |:--|:--|:--|:--|:--|:--|:--|
-| — | 初期化 | `setup()` | ピンモード設定・ライブラリ初期化・起動確認 | なし | なし | 起動時1回 |
-| — | （共通）待機・制御 | `loop()` | 状態に応じて各関数を呼び出すメインループ | なし | なし | 常時 |
-| — | （共通）ボタン読出 | `readButton()` | チャタリング処理済みのボタン状態を返す | なし | bool | loop()内 |
-| — | （共通）センサー読出 | `readSensor()` | センサー値を取得して sensorValue を更新 | なし | int (cm) | loop()内 |
-| — | （共通）出力更新 | `updateOutput()` | 現在の state に応じて LED/ブザーを制御 | int state | なし | loop()内 |
-| F01 | 必須機能①（requirements転記） | `doFeature1()` | 必須機能①の処理を行う | — | — | loop()内 |
-| F02 | 必須機能②（requirements転記） | `doFeature2()` | 必須機能②の処理を行う | — | — | loop()内 |
-| A01 | 追加機能①（余裕があれば） | `doOptional1()` | 追加機能①の処理を行う | — | — | loop()内 |
-|  |  |  |  |  |  |  |
-|  |  |  |  |  |  |  |
+| — | 初期化 | `setup()` | LCD、センサー、ブザーの初期化・起動確認 | なし | なし | 起動時1回 |
+| — | メイン制御 | `loop()` | 距離測定、状態判断、LCD表示、ブザー制御を繰り返す | なし | なし | 常時 |
+| F01 | 距離測定 | `measureDistance()` | 超音波センサーで障害物までの距離を測定する | なし | float | loop()内 |
+| F02 | 状態判定 | `judegState()` | 距離に応じてSafe、Caution、Danger、Errorを判定する | float distanceCm | int | loop()内 |
+| F03 | LCD表示 | `updateLCD()` | 距離と状態をLCD1602に表示する | float distanceCm, int state | なし | loop()内 |
+| F04 | ブザー警告 | `upDataBuzzer()` | 状態に応じてブザーを鳴らす、または停止する | int state | なし | loop()内 |
+| — | 注意音 | `coutionBeep()` | Caution時に低めの音をゆっくり鳴らす | なし | なし | upDataBuzzer()内 |
+| — | 危険音 | `dangerBeep()` | Danger時に高めの音を短い間隔で鳴らす | なし | なし | upDataBuzzer()内 |
 
 > [!CAUTION]
 > loop() の中で全部書こうとしていませんか？
