@@ -1,6 +1,6 @@
 # 詳細設計書 — 組込み開発実習
 
-<!-- 作成者: あなたの名前 / 日付: YYYY-MM-DD / グループ: 〇-〇 -->
+<!-- 作成者: CHEN　MINHAO / 日付: 2026-05-25 / グループ: 1-L -->
 
 > **このドキュメントの目的**
 > 基本設計書（basic_design.md）で「**どのような構造で作るか**」を決めました。
@@ -19,10 +19,10 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 作品タイトル | |
-| 状態の種類（1-2 状態遷移から） | |
-| 実装する関数の数（2-2 関数一覧から） | 　個 |
-| グローバル変数の合計バイト数（2-1 SRAM確認から） | 　B |
+| 作品タイトル | 簡易バックソナー表示装置 |
+| 状態の種類（1-2 状態遷移から） | 初期化、距離測定中、安全状態、注意状態、危険状態、エラー状態 |
+| 実装する関数の数（2-2 関数一覧から） | 8個 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 約20BB |
 
 ---
 
@@ -33,24 +33,50 @@
 
 ```
 【ピン定義】（basic_design.md 3-1 から転記）
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
-  PIN_LED_RED   = 9    // 赤LED
-  PIN_LED_GREEN = 10   // 緑LED
-  PIN_BUZZER    = 11   // パッシブブザー
+  PIN_BUZZER = 3 // パッシブブザー 
+  PIN_TRIG = 5 // 超音波センサー Trig 
+  PIN_ECHO = 6 // 超音波センサー Echo
+
+  LCD_RS = 7 // LCD1602 RS 
+  LCD_E = 8 // LCD1602 E 
+  LCD_D4 = 9 // LCD1602 D4 
+  LCD_D5 = 10 // LCD1602 D5 
+  LCD_D6 = 11 // LCD1602 D6 
+  LCD_D7 = 12 // LCD1602 D7
 
 【状態管理】（basic_design.md 1-2 の状態名から転記）
-  currentState  : int = 0   // 0:待機 1:動作中 2:完了 3:エラー
+  currentState : int = 0 
+  // 0: 初期化 
+  // 1: 距離測定中 
+  // 2: 安全状態 
+  // 3: 注意状態 
+  // 4: 危険状態 
+  // 5: エラー状態
 
 【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  lastMillis_LED    : unsigned long = 0
-  lastMillis_Sensor : unsigned long = 0
+  lastMillisSensor : unsigned long = 0 
+  lastMillisLCD : unsigned long = 0 
+  lastMillisBuzzer : unsigned long = 0
+
+  SENSOR_INTERVAL : const unsigned long = 300 
+  LCD_INTERVAL : const unsigned long = 300 
+  CAUTION_INTERVAL: const unsigned long = 500 
+  DANGER_INTERVAL : const unsigned long = 200
 
 【センサー・入力値】（basic_design.md 2-1 から転記）
-  sensorValue   : int  = 0
-  buttonState   : bool = false
+  duration : long = 0 // Echo信号の長さ 
+  distanceCm : float = 0.0 // 障害物までの距離（cm）
+
+【距離判定用の定数】 
+CAUTION_DISTANCE : const int = 50 // 50cm未満で注意状態 
+DANGER_DISTANCE : const int = 20 // 20cm未満で危険状態 
+MAX_DISTANCE : const int = 400 // 400cm超は測定範囲外
+
+【ブザー制御用】 
+buzzerOn : bool = false // ブザーのON/OFF状態を管理する
 
 【その他のフラグ・カウンター】
-  （自分のものを追加）
+isDistanceValid : bool = false // 距離が正常に測定できたかを表す
 ```
 
 ---
@@ -83,9 +109,19 @@
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1.
-2.
-3.
+1.LCD1602を初期化する
+   - lcd.begin(16, 2)を実行する
+   - 起動メッセージを表示する
+2.ピンモードを設定する
+   - PIN_TRIG → OUTPUT 
+   - PIN_ECHO → INPUT
+   - PIN_BUZZER → OUTPUT
+3.ブザーを停止状態にする
+   - noTone(PIN_BUZZER)を実行する
+4.デバッグ用にSerial通信を開始する
+   - Serial.begin(9600)を実行する
+5.初期状態を設定する
+   - currentState = 1（距離測定中）にする
 ```
 
 ---
@@ -122,16 +158,33 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
+  1.現在時刻を取得する 
+   - now = millis() 
+  2.一定周期ごとに距離を測定する 
+   - measureDistance()を呼び出す 
+   - 距離が正常に取得できたか確認する 
+  3.距離に応じて状態を判定する 
+   - judgeState(distanceCm)を呼び出す 
+   - currentState を更新する 
+  4.LCD表示を更新する 
+   - updateLCD(distanceCm, currentState)を呼び出す 
+  5.ブザーの状態を更新する 
+   - updateBuzzer(currentState)を呼び出す
 
+＜currentState が 1（距離測定中） のとき＞
+   - 超音波センサーで距離を測定する 測定結果をもとに次の状態へ遷移する
 
-＜currentState が 　　 のとき＞
+＜currentState が 2（安全状態） のとき＞
+   - LCDに距離とSafeを表示する ブザーは鳴らさない
 
+＜currentState が 3（注意状態） のとき＞
+   - LCDに距離とCautionを表示する ブザーをゆっくり鳴らす
 
-＜currentState が 　　 のとき＞
+＜currentState が 4（危険状態） のとき＞
+   - LCDに距離とDangerを表示する ブザーを短い間隔で鳴らす
 
-
-＜currentState が 　　 のとき＞
-
+＜currentState が 5（エラー状態） のとき＞
+   - LCDにOut of rangeなどのエラー表示を出す ブザーは鳴らさない
 ```
 
 ---
@@ -141,6 +194,25 @@
 > ※ 基本設計書 2-2 の関数一覧に記載した関数を1つずつ設計します。
 
 ---
+
+### `measureDistance()` — 超音波センサーで距離を測定する
+
+**basic_design.md 2-2 との対応：** （基本設計書の関数一覧の説明を転記）
+  超音波センサーで障害物までの距離を測定する。
+
+**引数：** `なし`
+
+**戻り値：** float型
+
+```
+【処理の流れ】
+1.
+2.
+3.
+
+【エラー・異常ケース】
+- 異常な値が来た場合:
+```
 
 ### `関数名()` — （役割を1行で書く）
 
