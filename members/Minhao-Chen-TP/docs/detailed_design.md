@@ -1,6 +1,6 @@
 # 詳細設計書 — 組込み開発実習
 
-<!-- 作成者: あなたの名前 / 日付: YYYY-MM-DD / グループ: 〇-〇 -->
+<!-- 作成者: CHEN　MINHAO / 日付: 2026-05-25 / グループ: 1-L -->
 
 > **このドキュメントの目的**
 > 基本設計書（basic_design.md）で「**どのような構造で作るか**」を決めました。
@@ -19,10 +19,10 @@
 
 | 項目 | basic_design.md から転記 |
 |:--|:--|
-| 作品タイトル | |
-| 状態の種類（1-2 状態遷移から） | |
-| 実装する関数の数（2-2 関数一覧から） | 　個 |
-| グローバル変数の合計バイト数（2-1 SRAM確認から） | 　B |
+| 作品タイトル | 簡易バックソナー表示装置 |
+| 状態の種類（1-2 状態遷移から） | 初期化、距離測定中、安全状態、注意状態、危険状態、エラー状態 |
+| 実装する関数の数（2-2 関数一覧から） | 8個 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 約20BB |
 
 ---
 
@@ -33,24 +33,50 @@
 
 ```
 【ピン定義】（basic_design.md 3-1 から転記）
-  PIN_BUTTON    = 2    // タクトスイッチ（INPUT_PULLUP）
-  PIN_LED_RED   = 9    // 赤LED
-  PIN_LED_GREEN = 10   // 緑LED
-  PIN_BUZZER    = 11   // パッシブブザー
+  PIN_BUZZER = 3 // パッシブブザー 
+  PIN_TRIG = 5 // 超音波センサー Trig 
+  PIN_ECHO = 6 // 超音波センサー Echo
+
+  LCD_RS = 7 // LCD1602 RS 
+  LCD_E = 8 // LCD1602 E 
+  LCD_D4 = 9 // LCD1602 D4 
+  LCD_D5 = 10 // LCD1602 D5 
+  LCD_D6 = 11 // LCD1602 D6 
+  LCD_D7 = 12 // LCD1602 D7
 
 【状態管理】（basic_design.md 1-2 の状態名から転記）
-  currentState  : int = 0   // 0:待機 1:動作中 2:完了 3:エラー
+  currentState : int = 0 
+  // 0: 初期化 
+  // 1: 距離測定中 
+  // 2: 安全状態 
+  // 3: 注意状態 
+  // 4: 危険状態 
+  // 5: エラー状態
 
 【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  lastMillis_LED    : unsigned long = 0
-  lastMillis_Sensor : unsigned long = 0
+  lastMillisSensor : unsigned long = 0 
+  lastMillisLCD : unsigned long = 0 
+  lastMillisBuzzer : unsigned long = 0
+
+  SENSOR_INTERVAL : const unsigned long = 300 
+  LCD_INTERVAL : const unsigned long = 300 
+  CAUTION_INTERVAL: const unsigned long = 500 
+  DANGER_INTERVAL : const unsigned long = 200
 
 【センサー・入力値】（basic_design.md 2-1 から転記）
-  sensorValue   : int  = 0
-  buttonState   : bool = false
+  duration : long = 0 // Echo信号の長さ 
+  distanceCm : float = 0.0 // 障害物までの距離（cm）
+
+【距離判定用の定数】 
+CAUTION_DISTANCE : const int = 50 // 50cm未満で注意状態 
+DANGER_DISTANCE : const int = 20 // 20cm未満で危険状態 
+MAX_DISTANCE : const int = 400 // 400cm超は測定範囲外
+
+【ブザー制御用】 
+buzzerOn : bool = false // ブザーのON/OFF状態を管理する
 
 【その他のフラグ・カウンター】
-  （自分のものを追加）
+isDistanceValid : bool = false // 距離が正常に測定できたかを表す
 ```
 
 ---
@@ -83,9 +109,19 @@
 **↓ 自分の setup() を設計してください**
 ```
 【処理の流れ】
-1.
-2.
-3.
+1.LCD1602を初期化する
+   - lcd.begin(16, 2)を実行する
+   - 起動メッセージを表示する
+2.ピンモードを設定する
+   - PIN_TRIG → OUTPUT 
+   - PIN_ECHO → INPUT
+   - PIN_BUZZER → OUTPUT
+3.ブザーを停止状態にする
+   - noTone(PIN_BUZZER)を実行する
+4.デバッグ用にSerial通信を開始する
+   - Serial.begin(9600)を実行する
+5.初期状態を設定する
+   - currentState = 1（距離測定中）にする
 ```
 
 ---
@@ -122,16 +158,33 @@
 【処理の流れ】
 
 ＜毎ループ実行すること＞
+  1.現在時刻を取得する 
+   - now = millis() 
+  2.一定周期ごとに距離を測定する 
+   - measureDistance()を呼び出す 
+   - 距離が正常に取得できたか確認する 
+  3.距離に応じて状態を判定する 
+   - judgeState(distanceCm)を呼び出す 
+   - currentState を更新する 
+  4.LCD表示を更新する 
+   - updateLCD(distanceCm, currentState)を呼び出す 
+  5.ブザーの状態を更新する 
+   - updateBuzzer(currentState)を呼び出す
 
+＜currentState が 1（距離測定中） のとき＞
+   - 超音波センサーで距離を測定する 測定結果をもとに次の状態へ遷移する
 
-＜currentState が 　　 のとき＞
+＜currentState が 2（安全状態） のとき＞
+   - LCDに距離とSafeを表示する ブザーは鳴らさない
 
+＜currentState が 3（注意状態） のとき＞
+   - LCDに距離とCautionを表示する ブザーをゆっくり鳴らす
 
-＜currentState が 　　 のとき＞
+＜currentState が 4（危険状態） のとき＞
+   - LCDに距離とDangerを表示する ブザーを短い間隔で鳴らす
 
-
-＜currentState が 　　 のとき＞
-
+＜currentState が 5（エラー状態） のとき＞
+   - LCDにOut of rangeなどのエラー表示を出す ブザーは鳴らさない
 ```
 
 ---
@@ -142,22 +195,130 @@
 
 ---
 
-### `関数名()` — （役割を1行で書く）
+### `measureDistance()` — 超音波センサーで距離を測定する
 
-**basic_design.md 2-2 との対応：** （基本設計書の関数一覧の説明を転記）
+**basic_design.md 2-2 との対応：** 超音波センサーで障害物までの距離を測定する。
 
-**引数：** `引数名`（型）: 何の値か
+**引数：** `なし`
 
-**戻り値：** 型（なしの場合は void）
+**戻り値：** float型 
+障害物までの距離をcm単位で返す。測定できない場合は -1 を返す。
+```
+【処理の流れ】
+1.TrigピンをLOWにして、センサーを安定させる
+2.Trigピンを10マイクロ秒だけHIGHにする
+3.TrigピンをLOWに戻す
+4.EchoピンがHIGHになっている時間をpulseIn()で取得する
+5.Echo信号が取得できない場合は -1 を返す
+6.取得した時間から距離を計算する
+7.計算した距離を返す
+
+【エラー・異常ケース】
+- Echo信号が返ってこない場合: -1 を返す
+- 距離が0cm以下、または400cmを超える場合:測定範囲外として扱う
+```
+
+### `judgeState()` — 距離に応じて状態を判定する
+
+**basic_design.md 2-2 との対応：** 距離に応じてSafe、Caution、Danger、Errorを判定する。
+
+**引数：** `distanceCm`（float）: 障害物までの距離
+
+**戻り値：** int型 
 
 ```
 【処理の流れ】
-1.
-2.
-3.
+1. distanceCm が0以下、または400cmを超えているか確認する
+2.異常値の場合は 5（エラー状態） を返す
+3. distanceCm が20cm未満の場合は 4（危険状態） を返す
+4. distanceCm が20cm以上50cm未満の場合は 3（注意状態） を返す
+5. distanceCm が50cm以上の場合は 2（安全状態） を返す
 
 【エラー・異常ケース】
-- 異常な値が来た場合:
+- distanceCm が -1 の場合：センサーが測定できなかったと判断し、5（エラー状態）を返す
+```
+
+### `updateLCD()` — LCD1602に距離と状態を表示する
+
+**basic_design.md 2-2 との対応：** 距離と状態をLCD1602に表示する。
+
+**引数：** `distanceCm`（float）: 障害物までの距離
+          `state`（int）: 現在の状態
+
+**戻り値：** void型
+
+```
+【処理の流れ】
+1.LCDの表示を更新するタイミングか確認する
+2.LCD画面をクリアする
+3. state がエラー状態の場合は、1行目に "Out of range" を表示する 2行目に "No object" を表示する
+4. state が正常状態の場合 1行目に "Dist: XXcm" を表示する 2行目に状態名を表示する
+
+【エラー・異常ケース】
+- 距離が測定できない場合：距離の数値は表示せず、エラーメッセージを表示する
+- 前回の文字がLCDに残る場合： lcd.clear() または空白文字で表示を消す
+```
+
+### `updateBuzzer()` — 状態に応じてブザーを制御する
+
+**basic_design.md 2-2 との対応：** 状態に応じてブザーを鳴らす、または停止する。
+
+**引数：** `state`（int）: 現在の状態
+
+**戻り値：** void型
+
+```
+【処理の流れ】
+1.state を確認する
+2.安全状態の場合 noTone(PIN_BUZZER) を実行し、ブザーを停止する
+3.注意状態の場合 cautionBeep() を呼び出す
+4.危険状態の場合 dangerBeep() を呼び出す
+5.エラー状態の場合 noTone(PIN_BUZZER) を実行し、ブザーを停止する
+
+【エラー・異常ケース】
+- センサー異常時：誤警告を防ぐため、ブザーを鳴らさない
+```
+
+### `cautionBeep()` — 注意状態の警告音を鳴らす
+
+**basic_design.md 2-2 との対応：** Caution時に低めの音をゆっくり鳴らす。
+
+**引数：** `なし`
+
+**戻り値：** void型
+
+```
+【処理の流れ】
+1.millis()で現在時刻を取得する
+2.前回ブザー状態を切り替えた時刻から一定時間が経過したか確認する
+3.一定時間が経過していれば、ブザーのON/OFFを切り替える
+4.ブザーONの場合は tone(PIN_BUZZER, 800) を実行する
+5.ブザーOFFの場合は noTone(PIN_BUZZER) を実行する
+6.lastMillisBuzzerを更新する
+
+【エラー・異常ケース】
+- 状態がCaution以外に変わった場合： noTone(PIN_BUZZER) で停止する
+```
+
+### `dangerBeep()` — 危険状態の警告音を鳴らす
+
+**basic_design.md 2-2 との対応：** Danger時に高めの音を短い間隔で鳴らす。
+
+**引数：** `なし`
+
+**戻り値：** void型
+
+```
+【処理の流れ】
+1.millis()で現在時刻を取得する
+2.前回ブザー状態を切り替えた時刻から一定時間が経過したか確認する
+3.一定時間が経過していれば、ブザーのON/OFFを切り替える
+4.ブザーONの場合は tone(PIN_BUZZER, 1200)を実行する
+5.ブザーOFFの場合は noTone(PIN_BUZZER)を実行する
+6.lastMillisBuzzerを更新する
+
+【エラー・異常ケース】
+- 状態がDanger以外に変わった場合：noTone(PIN_BUZZER)で停止する
 ```
 
 ---
@@ -170,18 +331,13 @@
 
 ```
 【考え方】
-  ボタンが押されたとき、50ms 以内の連続入力は「同じ1回の押下」として無視する。
+  今回の装置ではボタンを使用しないため、チャタリング防止処理は実装しない。
 
 【処理の流れ】
-  1. ボタンのデジタル値を読む（digitalRead）
-  2. 前回確定した時刻（lastDebounceTime）からの経過時間を計算する
-  3. 経過時間 < DEBOUNCE_DELAY（例: 50ms）→ 無視する
-  4. 経過時間 ≥ DEBOUNCE_DELAY → ボタンの状態として確定する
-  5. lastDebounceTime を更新する
+  なし
 
 【必要な変数（Section 1 に追加済みか確認）】
-  lastDebounceTime : unsigned long   // 前回確定した時刻
-  DEBOUNCE_DELAY   : const int = 50  // チャタリング判定時間（ms）
+  なし
 ```
 
 ---
@@ -190,16 +346,23 @@
 
 ```
 【考え方】
-  「前回実行した時刻」を記録しておき、「今の時刻 − 前回時刻 ≥ 周期」なら実行する。
+  距離測定、LCD表示更新、ブザー制御をそれぞれ一定周期で実行する。 delay()を多用すると、その間は距離測定や表示更新が止まってしまうため、millis()を使って処理を止めずに制御する。
 
 【処理の流れ（例: LED点滅）】
-  1. now = millis()
-  2. now - lastMillis_LED >= LED_INTERVAL かどうか確認
-  3. 条件を満たした場合: LEDのON/OFFを切り替え、lastMillis_LED = now
-  4. 条件を満たさない場合: 何もしない（次のループで再チェック）
+  1.loop() の最初で現在時刻 now = millis()を取得する。
+  2.now - lastMillisSensor >= SENSOR_INTERVALの場合、measureDistance()を実行し、lastMillisSensor = now に更新する。
+  3.距離測定後、judgeState()で現在の状態を判定する。
+  4.now - lastMillisLCD >= LCD_INTERVAL の場合、 updateLCD() を実行し、lastMillisLCD = now に更新する。
+  5.updateBuzzer() の中で現在状態を確認する。
+  6.Caution または Danger の場合、 now - lastMillisBuzzer が設定した間隔以上か確認する。
+  7.条件を満たした場合、ブザーのON/OFFを切り替え、 lastMillisBuzzer = now に更新する。
 
 【自分のシステムで millis() を使う処理】
   （basic_design.md 2-3 のタイミング設計から転記して具体化する）
+ - 距離測定：SENSOR_INTERVAL = 300ms ごと
+ - LCD表示更新：LCD_INTERVAL = 300ms ごと
+ - Caution時のブザー制御：CAUTION_INTERVAL = 500ms ごと
+ - Danger時のブザー制御：DANGER_INTERVAL = 200ms ごと
 ```
 
 ---
@@ -229,10 +392,10 @@
 
 | No | 確認したい内容 | 挿入する関数 | Serial.println の内容例 |
 |:---|:---|:---|:---|
-| 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
-| 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
-| 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
-| 4 |  |  |  |
+| 1 | 距離が正しく測定できているか | `measureDistance()` | `Serial.println(distanceCm);` |
+| 2 | 状態判定が正しいか | `judgeState()` | `Serial.println(currentState);` |
+| 3 | LCD表示が更新されているか | `updateLCD()` | `Serial.println("LCD update");` |
+| 4 | ブザー制御が実行されているか | updateBuzzer() | Serial.println("Buzzer update"); |
 
 ---
 
@@ -245,26 +408,36 @@
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | readButton() | タクトスイッチを1回押す | true が返る | | [ ] |
-| 2 | readButton() | スイッチを素早く2回押す | 1回分だけ true になる | | [ ] |
-| 3 | readSensor() | センサーを正常範囲で使う | 仕様範囲内の値が返る | | [ ] |
-| 4 | readSensor() | センサーを遮蔽・範囲外に向ける | 誤動作しない | | [ ] |
-| 5 | （自分の関数を追加） | | | | [ ] |
+| 1 | measureDistance()	 | センサーの前に物体を置く	 | 距離がcm単位で取得できる | | [ ] |
+| 2 | measureDistance() | 物体を近づけたり離したりする | 距離の値が変化する | | [ ] |
+| 3 | measureDistance() | センサーの前に物体を置かない | -1、または測定範囲外として扱える | | [ ] |
+| 4 | judgeState() | distanceCm = 60 を渡す | 安全状態を返す | | [ ] |
+| 5 | judgeState() | distanceCm = 30 を渡す | 注意状態を返す | | [ ] |
+| 6 | judgeState() | distanceCm = 10 を渡す | 危険状態を返す | | [ ] |
+| 7 | judgeState() | distanceCm = -1 を渡す | エラー状態を返す | | [ ] |
 
 ### 5-2. 出力系テスト
 
 | No | テスト対象の関数 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | updateOutput(0) | state=0（待機中）を渡す | 緑LEDが点滅する | | [ ] |
-| 2 | updateOutput(1) | state=1（動作中）を渡す | 赤LEDが点灯、ブザーが鳴る | | [ ] |
-| 3 | （自分の状態・関数を追加） | | | | [ ] |
+| 1 | updateLCD() | 安全状態を渡す | LCDに距離とSafeが表示される | | [ ] |
+| 2 | updateLCD() | 注意状態を渡す | LCDに距離とCautionが表示される | | [ ] |
+| 3 | updateLCD() | 危険状態を渡す | LCDに距離とDangerが表示される | | [ ] |
+| 4 |	updateLCD() | エラー状態を渡す | LCDにOut of rangeなどが表示される	 | | [ ] |
+| 5 | updateBuzzer() | 安全状態を渡す | ブザーが鳴らない | | [ ] |
+| 6 | updateBuzzer() | 注意状態を渡す | ブザーがゆっくり鳴る | | [ ] |
+| 7 | updateBuzzer() | 危険状態を渡す | ブザーが短い間隔で鳴る | | [ ] |
+| 8 | updateBuzzer() | エラー状態を渡す | ブザーが鳴らない | | [ ] |
 
 ### 5-3. タイミング・並行動作テスト
 
 | No | テスト内容 | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | delay()による処理停止がないか | LED点滅中にボタンを押す | ボタン入力が無視されない | | [ ] |
-| 2 | millis()タイマーの周期精度 | 点滅をストップウォッチで確認 | 設計した周期（例:500ms）通りに点滅 | | [ ] |
+| 1 | 距離測定周期の確認 | 物体を動かしながらSerial Monitorで距離を確認する | 約300msごとに距離が更新される | | [ ] |
+| 2 | LCD表示更新周期の確認 | 物体を近づけたり離したりしてLCD表示を確認する | 距離の変化に合わせてLCDが更新される | | [ ] |
+| 3 | Caution時のブザー間隔 | 物体を20cm以上50cm未満に置く | ブザーがゆっくり鳴る | | [ ] |
+| 4 | Danger時のブザー間隔 | 物体を20cm未満に置く | ブザーが短い間隔で鳴る | | [ ] |
+| 5 | ブザー動作中の距離更新 | ブザーが鳴っている状態で物体の距離を変える | ブザー動作中でも距離とLCD表示が更新される | | [ ] |
 
 ---
 
@@ -277,9 +450,15 @@
 > 「この詳細設計書に書いた関数と処理フローをもとに Arduino でコードを書きます。バグになりやすい箇所・処理の抜け・型の問題はありますか？」
 
 **AIの回答（要約）：**
+距離測定、状態判定、LCD表示、ブザー制御が関数ごとに分かれているため、処理の役割は分かりやすい。
+ただし、pulseIn()でEcho信号が返らない場合は処理が止まりやすいため、タイムアウトを設定する必要がある。
+また、distanceCmは小数を扱うためfloatで問題ないが、LCD表示では整数に変換して表示すると見やすい。
+ブザー制御は delay()ではなくmillis()を使うことで、距離測定やLCD表示が止まらないようにできる。
 
 **対応した内容：**
-
+pulseIn()にはタイムアウトを設定し、測定できない場合は-1を返す方針にした。
+LCDには距離をcm単位で表示し、小数点以下は表示しない方針にした。
+ブザー制御は millis()を使い、Caution時とDanger時で鳴る間隔を変える設計にした。
 ---
 
 ### Q2: 単体テスト仕様の確認
@@ -287,8 +466,15 @@
 > 「Section 5 の単体テスト仕様書で、各関数の動作が正しく検証できていますか？テストが不足している項目や、境界値テストが必要な箇所を教えてください。」
 
 **AIの回答（要約）：**
+入力系では measureDistance()とjudgeState()のテストがあり、距離測定と状態判定を確認できる。
+出力系では updateLCD()とupdateBuzzer()のテストがあり、LCD表示とブザー動作を確認できる。
+ただし、状態が切り替わる境界値である20cmと50cm付近のテストを追加すると、判定ミスを確認しやすい。
+また、エラー値として-1や400cm超の値を渡した場合の確認も重要である。
 
 **対応した内容：**
+単体テストに、10cm、30cm、60cm、-1の判定テストを入れた。
+さらに、必要に応じて20cm付近と50cm付近の境界値テストを追加する方針にした。
+エラー状態ではLCDにエラー表示を出し、ブザーを鳴らさないことを確認する。
 
 ---
 
@@ -309,4 +495,4 @@
 
 ---
 
-*初版: YYYY-MM-DD / AIレビュー: YYYY-MM-DD / グループレビュー後更新: YYYY-MM-DD*
+*初版: 2026-05-26 / AIレビュー: 2026-05-26 / グループレビュー後更新: 2026-05-26*
