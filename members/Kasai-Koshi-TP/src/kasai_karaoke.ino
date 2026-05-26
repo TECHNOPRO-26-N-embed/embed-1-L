@@ -22,29 +22,73 @@ enum AppState {
 
 LiquidCrystal lcd(PIN_LCD_RS, PIN_LCD_EN, PIN_LCD_D4, PIN_LCD_D5, PIN_LCD_D6, PIN_LCD_D7);
 
+
+
+// ドレミの歌 1番（英語歌詞・全フレーズ）
 const char* lyrics[] = {
-  "Twinkle twinkle",
-  "little star",
-  "how I wonder",
-  "what you are",
-  "up above the",
-  "world so high",
-  "like a diamond",
-  "in the sky"
+  "Do, a deer",            // 1
+  "a female deer",         // 2
+  "Re, a drop",            // 3
+  "of golden sun",         // 4
+  "Mi, a name",            // 5
+  "I call myself",         // 6
+  "Fa, a long",            // 7
+  "long way to run",       // 8
+  "So, a needle",          // 9
+  "pulling thread",        // 10
+  "La, a note",            // 11
+  "to follow So",          // 12
+  "Ti, a drink",           // 13
+  "with jam and bread",    // 14
+  "That will bring",       // 15
+  "us back to Do!"         // 16
 };
 
+// 各歌詞の表示間隔（ミリ秒）
 const unsigned long lyricsIntervals[] = {
-  1200, 1200, 1200, 1200, 1200, 1200, 1200, 1200
+  3862, 3862, 1200, 1200, 1200, 1200, 1200, 1200,
+  1200, 1200, 1200, 1200, 1200, 1200, 1200, 1800
 };
 
+// メロディ（Cメジャー基準、フレーズ感を出すために休符を追加）
 const int melody[] = {
-  262, 262, 392, 392, 440, 440, 392,
-  349, 349, 330, 330, 294, 294, 262
+  // Do, a deer, a female deer
+  262, 294, 330, 262, 330, 262, 330, 0,
+  // Re, a drop of golden sun
+  294, 330, 349, 349, 330, 294, 349, 0,
+  // Mi, a name I call myself
+  330, 349, 392, 330, 392, 330, 392, 0,
+  // Fa, a long long way to run
+  349, 392, 440, 440, 392, 349, 440, 0,
+  // So, a needle pulling thread
+  392, 262, 294, 330, 349, 392, 440, 0,
+  // La, a note to follow So
+  440, 294, 330, 370, 392, 440, 494, 0,
+  // Ti, a drink with jam and bread
+  494, 330, 370, 415, 440, 494, 523, 0,
+  // That will bring us back to Do!
+  440, 349, 587, 494, 523, 523, 0
 };
 
+// 各音符の長さ（ミリ秒）
 const unsigned long noteDurations[] = {
-  400, 400, 400, 400, 400, 400, 800,
-  400, 400, 400, 400, 400, 400, 800
+  // Do, a deer, a female deer
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // Re, a drop of golden sun
+  //726, 242, 726, 242, 484, 484, 958, 180,
+  500,250,500,250,500,500,1000,
+  // Mi, a name I call myself
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // Fa, a long long way to run
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // So, a needle pulling thread
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // La, a note to follow So
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // Ti, a drink with jam and bread
+  726, 242, 726, 242, 484, 484, 968, 180,
+  // That will bring us back to Do!
+  484, 484, 726, 242, 968, 968, 968
 };
 
 const size_t lyricsCount = sizeof(lyrics) / sizeof(lyrics[0]);
@@ -74,6 +118,7 @@ void playMelody(unsigned long now);
 bool Finish(unsigned long now);
 void stopPlayback();
 void showError(const char* message);
+void showLyricsPair(size_t firstIndex);
 
 void setup() {
   pinMode(PIN_BUTTON, INPUT_PULLUP);
@@ -177,9 +222,7 @@ void start(unsigned long now) {
   lastMillis_lyrics = now;
   lastMillis_Melody = now;
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print(lyrics[lyricsIndex]);
+  showLyricsPair(lyricsIndex);
 
   if (melody[melodyIndex] > 0) {
     tone(PIN_BUZZER, melody[melodyIndex]);
@@ -194,16 +237,32 @@ void updateLyrics(unsigned long now) {
     return;
   }
 
-  if ((now - lastMillis_lyrics) >= lyricsIntervals[lyricsIndex]) {
-    lyricsIndex++;
+  unsigned long displayInterval = lyricsIntervals[lyricsIndex];
+  if ((lyricsIndex + 1) < lyricsCount) {
+    displayInterval += lyricsIntervals[lyricsIndex + 1];
+  }
+
+  if ((now - lastMillis_lyrics) >= displayInterval) {
+    lyricsIndex += 2;
     lastMillis_lyrics = now;
 
-    lcd.clear();
-    lcd.setCursor(0, 0);
-
     if (lyricsIndex < lyricsCount) {
-      lcd.print(lyrics[lyricsIndex]);
+      showLyricsPair(lyricsIndex);
     }
+  }
+}
+
+void showLyricsPair(size_t firstIndex) {
+  lcd.clear();
+
+  if (firstIndex < lyricsCount) {
+    lcd.setCursor(0, 0);
+    lcd.print(lyrics[firstIndex]);
+  }
+
+  if ((firstIndex + 1) < lyricsCount) {
+    lcd.setCursor(0, 1);
+    lcd.print(lyrics[firstIndex + 1]);
   }
 }
 
