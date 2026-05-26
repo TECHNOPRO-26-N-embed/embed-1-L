@@ -198,6 +198,28 @@ void drawFrame() {
   lastDrawnLane = playerLane;
 }
 
+// 衝突判定関数
+// プレイヤーと障害物が同じ位置にいるかを確認します。
+bool checkCollision() {
+  // プレイヤーの現在位置を取得
+  int playerRow = playerLane;
+  int playerCol = 0; // プレイヤーは常に左端にいると仮定
+
+  // プレイヤー位置に障害物があるか確認
+  if (obstaclePos[playerRow][playerCol] == 1) {
+    return true;
+  }
+
+  return false;
+}
+
+// ゲームオーバー画面を表示する関数
+void showGameOver() {
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("gameover");
+}
+
 // 初期化処理（電源ON直後に1回だけ実行）
 void setup() {
   // ボタンピンをプルアップ入力に設定
@@ -239,6 +261,15 @@ void loop() {
   if ((now - lastDrawTime) >= DRAW_FRAME_MS) {
     drawFrame();
     lastDrawTime = now;
+  }
+
+  // 衝突判定を実行
+  if (checkCollision()) {
+    showGameOver();
+    while (true) {
+      // ゲームオーバー後は無限ループで停止
+      delay(100);
+    }
   }
 
   // ループを少しだけ休ませる
