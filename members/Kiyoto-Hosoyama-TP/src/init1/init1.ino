@@ -1,5 +1,7 @@
 #include <LiquidCrystal.h>
 
+
+
 // LCDを使うためのライブラリを読み込みます。
 // 16x2の文字LCDに文字を表示するために使います。
 
@@ -30,8 +32,15 @@ const unsigned long OBSTACLE_SPAWN_MS = 1000; // 生成間隔（1段空きに見
 // 画面を描き直す間隔（ms）
 const unsigned long DRAW_FRAME_MS = 60;
 
+// ゲーム状態
+enum GameState {
+  STATE_WAITING = 0,
+  STATE_PLAYING = 1,
+  STATE_GAME_OVER = 2
+};
+
 // ==============================
-// グローバル変数（状態を記録する値）
+// グローバル変数
 // ==============================
 // プレイヤーのいるレーン（0:左列, 1:右列）
 int playerLane = 0;
@@ -56,6 +65,10 @@ unsigned long lastDrawTime = 0;
 int lastSpawnLane = -1;
 // 同じレーンに連続生成した回数
 int consecutiveSpawnCount = 0;
+// 現在のゲーム状態
+GameState currentState = STATE_WAITING;
+// 状態遷移直後の1回処理用フラグ
+bool stateChanged = true;
 
 // ボタン入力を読む関数
 // 押した瞬間だけ true を返し、押しっぱなしでは連続 true にならないようにします。
@@ -195,6 +208,11 @@ void drawFrame() {
   // プレイヤーは障害物より手前に描画する
   lcd.setCursor(0, playerLane);
   lcd.print("*");
+
+  Serial.print("[PLAYING] PLAYER row=");
+  Serial.print(playerLane);
+  Serial.println(" col=0");
+
   lastDrawnLane = playerLane;
 }
 
@@ -216,63 +234,128 @@ bool checkCollision() {
 // ゲームオーバー画面を表示する関数
 void showGameOver() {
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("gameover");
+  lcd.setCursor(3, 0);
+  lcd.print("GAME OVER");
+  lcd.setCursor(0, 1);
+  lcd.print("PRESS TO RETRY");
+}
+
+// 待機画面を表示する関数
+void showWaitingScreen() {
+  
+  lcd.setCursor(3, 0);
+  lcd.print("Game Start");
+  lcd.setCursor(2, 1);
+  lcd.print("Push Button");
+  
+}
+
+// ゲームを開始状態に初期化する関数
+void initGame() {
+  playerLane = 0;
+  lastDrawnLane = -1;
+  lastSpawnLane = -1;
+  consecutiveSpawnCount = 0;
+
+  lcd.begin(LCD_COLS, LCD_ROWS);
+  for (int lane = 0; lane < LCD_ROWS; lane++) {
+    for (int y = 0; y < LCD_COLS; y++) {
+      obstaclePos[lane][y] = 0;
+    }
+  }
+
+  unsigned long now = millis();
+  lastObstacleFallTime = now;
+  lastObstacleSpawnTime = now;
+  lastDrawTime = now;
 }
 
 // 初期化処理（電源ON直後に1回だけ実行）
 void setup() {
-  // ボタンピンをプルアップ入力に設定
-  pinMode(PIN_BUTTON, INPUT_PULLUP); // プルアップでボタン入力
-  // LCDを 16x2 で初期化
-  lcd.begin(LCD_COLS, LCD_ROWS);
+  
+   // LCDを 16x2 で初期化
+  lcd.begin(16, 2);
+  showWaitingScreen();
   // 乱数の偏りを減らすための種設定
   randomSeed(analogRead(A0));
   // 各タイマーの開始時刻をそろえる
   lastObstacleFallTime = millis();
   lastObstacleSpawnTime = millis();
   lastDrawTime = millis();
-  // 起動時に最初の画面を表示
-  drawFrame();
+  // 起動時は待機画面
+  currentState = STATE_WAITING;
+  stateChanged = true;
+
+  // ボタンピンをプルアップ入力に設定
+  pinMode(PIN_BUTTON, INPUT_PULLUP); // プルアップでボタン入力
 }
 
 // メインループ（setup後に繰り返し実行）
 void loop() {
+  
   // 現在時刻（ms）を取得
   unsigned long now = millis();
   // ボタン入力の更新
   bool pressed = readButton();
-  // プレイヤー移動
-  updatePlayer(pressed);
 
-  // 一定時間ごとに障害物を1段落とす
-  if ((now - lastObstacleFallTime) >= OBSTACLE_FALL_MS) {
-    updateObstacles();
-    lastObstacleFallTime = now;
-  }
+  if (currentState == STATE_WAITING) {
+    if (stateChanged) {
+      //showWaitingScreen();
+      stateChanged = false;
+    }
 
-  // 一定時間ごとに障害物を生成
-  if ((now - lastObstacleSpawnTime) >= OBSTACLE_SPAWN_MS) {
-    spawnObstacle();
-    lastObstacleSpawnTime = now;
-  }
+    if (pressed) {
+      initGame();
+      currentState = STATE_PLAYING;
+      stateChanged = true;
+    }
+  } else if (currentState == STATE_PLAYING) {
+    if (stateChanged) {
+      lcd.clear();
+      stateChanged = false;
+    }
 
-  // 描画は別タイマーで制御してちらつきを抑える
-  if ((now - lastDrawTime) >= DRAW_FRAME_MS) {
-    drawFrame();
-    lastDrawTime = now;
-  }
+    // プレイヤー移動
+    updatePlayer(pressed);
 
-  // 衝突判定を実行
-  if (checkCollision()) {
-    showGameOver();
-    while (true) {
-      // ゲームオーバー後は無限ループで停止
-      delay(100);
+    // 一定時間ごとに障害物を1段落とす
+    if ((now - lastObstacleFallTime) >= OBSTACLE_FALL_MS) {
+      updateObstacles();
+      lastObstacleFallTime = now;
+    }
+
+    // 一定時間ごとに障害物を生成
+    if ((now - lastObstacleSpawnTime) >= OBSTACLE_SPAWN_MS) {
+      spawnObstacle();
+      lastObstacleSpawnTime = now;
+    }
+
+    // 描画は別タイマーで制御してちらつきを抑える
+    if ((now - lastDrawTime) >= DRAW_FRAME_MS) {
+      drawFrame();
+      lastDrawTime = now;
+    }
+
+    // 衝突したらゲームオーバーへ
+    if (checkCollision()) {
+      currentState = STATE_GAME_OVER;
+      stateChanged = true;
+    }
+  } else if (currentState == STATE_GAME_OVER) {
+    if (stateChanged) {
+      showGameOver();
+      stateChanged = false;
+    }
+
+    if (pressed) {
+      currentState = STATE_WAITING;
+      stateChanged = true;
     }
   }
 
   // ループを少しだけ休ませる
   delay(10);
+
+
 }
 
